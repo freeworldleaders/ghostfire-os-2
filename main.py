@@ -1,4 +1,3 @@
-from cli.main import boot
+from runtime.engine import RuntimeEngine
 
-if __name__ == "__main__":
-    boot()
+RuntimeEngine().start()
