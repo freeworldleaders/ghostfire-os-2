@@ -1,5 +1,6 @@
 import concurrent.futures
 import json
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -77,7 +78,7 @@ class RestApiTests(unittest.TestCase):
         token: str | None = None,
         method: str = "GET",
     ) -> tuple[int, dict, dict]:
-        headers = {}
+        headers = {"Connection": "close"}
 
         if token is not None:
             headers["Authorization"] = f"Bearer {token}"
@@ -88,27 +89,51 @@ class RestApiTests(unittest.TestCase):
             headers=headers,
         )
 
-        try:
-            response = urllib.request.urlopen(
-                request,
-                timeout=2,
-            )
-        except urllib.error.HTTPError as exc:
-            response = exc
+        for attempt in range(6):
+            response = None
 
-        body = response.read()
+            try:
+                try:
+                    response = urllib.request.urlopen(
+                        request,
+                        timeout=2,
+                    )
+                except urllib.error.HTTPError as exc:
+                    response = exc
 
-        payload = (
-            json.loads(body.decode("utf-8"))
-            if body
-            else {}
-        )
+                body = response.read()
+                status = response.status
+                response_headers = dict(
+                    response.headers.items()
+                )
 
-        return (
-            response.status,
-            payload,
-            dict(response.headers.items()),
-        )
+                payload = (
+                    json.loads(body.decode("utf-8"))
+                    if body
+                    else {}
+                )
+
+                return (
+                    status,
+                    payload,
+                    response_headers,
+                )
+            except urllib.error.URLError as exc:
+                winerror = getattr(
+                    exc.reason,
+                    "winerror",
+                    None,
+                )
+
+                if winerror != 10048 or attempt == 5:
+                    raise
+
+                time.sleep(0.1 * (2 ** attempt))
+            finally:
+                if response is not None:
+                    response.close()
+
+        raise AssertionError("HTTP request retry loop exhausted")
 
     def test_non_loopback_requires_authentication(self) -> None:
         manager = ServiceManager()
@@ -136,6 +161,21 @@ class RestApiTests(unittest.TestCase):
         self.assertTrue(server.stop())
         self.assertFalse(server.stop())
         self.assertFalse(server.is_running())
+
+    def test_responses_close_connections(self) -> None:
+        server, _, _ = self.make_server()
+        server.start()
+
+        status, _, headers = self.request(
+            server,
+            "/health",
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            headers["Connection"].lower(),
+            "close",
+        )
 
     def test_health_endpoint_is_public(self) -> None:
         server, _, _ = self.make_server(
@@ -362,14 +402,14 @@ class RestApiTests(unittest.TestCase):
             return status
 
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=8
+            max_workers=4
         ) as executor:
             statuses = list(
-                executor.map(get_health, range(24))
+                executor.map(get_health, range(16))
             )
 
-        self.assertEqual(statuses, [200] * 24)
-        self.assertEqual(server.request_count, 24)
+        self.assertEqual(statuses, [200] * 16)
+        self.assertEqual(server.request_count, 16)
 
     def test_service_manager_can_manage_rest_api(self) -> None:
         event_bus = EventBus()

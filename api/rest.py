@@ -35,6 +35,7 @@ class RestApiSecurityError(RestApiError):
 class _GhostFireHttpServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 64
 
 
 class RestApiServer:
@@ -383,11 +384,14 @@ class RestApiServer:
         self,
         handler: BaseHTTPRequestHandler,
     ) -> None:
+        handler.close_connection = True
         handler.send_response(HTTPStatus.NO_CONTENT)
         handler.send_header("Allow", "GET, HEAD, OPTIONS")
         handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Connection", "close")
         handler.send_header("Content-Length", "0")
         handler.end_headers()
+        handler.wfile.flush()
 
     def _route(
         self,
@@ -578,6 +582,7 @@ class RestApiServer:
             default=self._json_default,
         ).encode("utf-8")
 
+        handler.close_connection = True
         handler.send_response(status)
         handler.send_header(
             "Content-Type",
@@ -588,6 +593,7 @@ class RestApiServer:
             str(len(body)),
         )
         handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Connection", "close")
         handler.send_header(
             "X-Content-Type-Options",
             "nosniff",
@@ -607,6 +613,8 @@ class RestApiServer:
 
         if not head_only:
             handler.wfile.write(body)
+
+        handler.wfile.flush()
 
     def _publish(
         self,
