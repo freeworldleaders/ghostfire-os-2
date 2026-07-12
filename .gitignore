@@ -139,4 +139,14 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 # Python generated artifacts
-System.Object[]
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
