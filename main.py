@@ -11,6 +11,7 @@ from core.scheduler import Scheduler
 from core.service_manager import ServiceManager
 from runtime.engine import RuntimeEngine
 from router.router import CommandRouter
+from agents.orchestrator import AgentTaskOrchestrator
 from agents.registry import AgentRegistry
 from plugins.manager import PluginManager
 
@@ -86,6 +87,15 @@ registry.register(
     capabilities=("validate", "guard", "status"),
 )
 
+orchestrator = AgentTaskOrchestrator(
+    registry,
+    event_bus=event_bus,
+    history_limit=settings[
+        "agent_orchestrator"
+    ]["history_limit"],
+    max_tasks=settings["agent_orchestrator"]["max_tasks"],
+)
+
 plugins = PluginManager()
 dashboard = None
 rest_api = None
@@ -133,6 +143,7 @@ def websocket_status():
         "configuration_revision": configuration.revision,
         "scheduler_running": scheduler.is_running,
         "agents": registry.snapshot(),
+        "agent_orchestrator": orchestrator.snapshot(),
         "services": [
             {
                 "name": status.name,
@@ -193,6 +204,14 @@ service_manager.register(
 )
 
 service_manager.register(
+    "agent_orchestrator",
+    orchestrator.start,
+    stop=orchestrator.stop,
+    dependencies=("agents",),
+    health=orchestrator.health,
+)
+
+service_manager.register(
     "plugins",
     start_plugins,
     dependencies=("runtime",),
@@ -249,6 +268,7 @@ scheduler.run_pending()
 
 print("Scheduler online")
 print("AI agent framework online")
+print("Agent task orchestrator online")
 
 if rest_api is not None:
     print(f"REST API online: {rest_api.base_url}")
@@ -302,6 +322,7 @@ event_bus.emit(
             agent.name
             for agent in registry.list_agents()
         ],
+        "agent_orchestrator": "online",
         "plugins": "started",
         "scheduler": "online",
         "logging": "online",

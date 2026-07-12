@@ -33,6 +33,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "history_limit": 100,
         "memory_limit": 100,
     },
+    "agent_orchestrator": {
+        "history_limit": 100,
+        "max_tasks": 1_000,
+    },
     "terminal_dashboard": {
         "enabled": True,
         "color": False,
@@ -68,6 +72,8 @@ REQUIRED_SETTINGS = {
     "service_manager.scheduler_stop_timeout": (int, float),
     "ai_agents.history_limit": int,
     "ai_agents.memory_limit": int,
+    "agent_orchestrator.history_limit": int,
+    "agent_orchestrator.max_tasks": int,
     "terminal_dashboard.enabled": bool,
     "terminal_dashboard.color": bool,
     "terminal_dashboard.width": int,
