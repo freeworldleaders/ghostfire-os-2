@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from config.settings import SETTINGS
+from config.settings import load_configuration
 from core.eventbus import EventBus
 from core.logging import GhostFireLogger
 from core.scheduler import Scheduler
@@ -13,8 +13,14 @@ from plugins.manager import PluginManager
 
 event_bus = EventBus()
 
+configuration = load_configuration(event_bus=event_bus)
+settings = configuration.as_dict()
+
+configured_log_root = settings["logging"]["root"]
+
 log_root = Path(
-    os.environ.get(
+    configured_log_root
+    or os.environ.get(
         "GHOSTFIRE_LOG_ROOT",
         str(Path.home() / ".ghostfire" / "logs"),
     )
@@ -23,13 +29,25 @@ log_root = Path(
 logger = GhostFireLogger(
     name="ghostfire.runtime",
     log_path=log_root / "ghostfire-os.jsonl",
+    max_bytes=settings["logging"]["max_bytes"],
+    backup_count=settings["logging"]["backup_count"],
     context={
-        "app_name": SETTINGS["app_name"],
-        "version": SETTINGS["version"],
+        "app_name": settings["app_name"],
+        "version": settings["version"],
+        "configuration_revision": configuration.revision,
     },
 )
 
 logger.attach_event_bus(event_bus)
+
+event_bus.emit(
+    "ghostfire.configuration.active",
+    {
+        "revision": configuration.revision,
+        "sources": list(configuration.sources),
+    },
+    raise_exceptions=False,
+)
 
 scheduler = Scheduler(event_bus=event_bus)
 service_manager = ServiceManager(event_bus=event_bus)
@@ -37,13 +55,14 @@ service_manager = ServiceManager(event_bus=event_bus)
 event_bus.emit(
     "ghostfire.boot.started",
     {
-        "app_name": SETTINGS["app_name"],
-        "version": SETTINGS["version"],
+        "app_name": settings["app_name"],
+        "version": settings["version"],
     },
     raise_exceptions=False,
 )
 
-print(f"{SETTINGS['app_name']} {SETTINGS['version']}")
+print(f"{settings['app_name']} {settings['version']}")
+print("Configuration loaded")
 
 runtime = RuntimeEngine()
 router = CommandRouter()
@@ -85,9 +104,15 @@ service_manager.register(
 
 service_manager.register(
     "scheduler",
-    lambda: scheduler.start(poll_interval=0.05),
+    lambda: scheduler.start(
+        poll_interval=settings["scheduler"]["poll_interval"],
+    ),
     stop=lambda: (
-        scheduler.stop(timeout=1.0)
+        scheduler.stop(
+            timeout=settings[
+                "service_manager"
+            ]["scheduler_stop_timeout"]
+        )
         if scheduler.is_running
         else False
     ),
@@ -128,6 +153,8 @@ event_bus.emit(
         "scheduler": "online",
         "logging": "online",
         "service_manager": "online",
+        "configuration": "loaded",
+        "configuration_revision": configuration.revision,
     },
     raise_exceptions=False,
 )
