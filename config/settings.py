@@ -42,6 +42,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "auth_token": None,
         "request_timeout": 2.0,
     },
+    "websocket_command_server": {
+        "enabled": True,
+        "host": "127.0.0.1",
+        "port": 8103,
+        "auth_token": None,
+        "allowed_commands": ["BOOT", "STATUS"],
+        "path": "/v1/commands",
+        "max_message_bytes": 65_536,
+        "idle_timeout": 30.0,
+    },
 }
 
 REQUIRED_SETTINGS = {
@@ -61,6 +71,14 @@ REQUIRED_SETTINGS = {
     "rest_api.port": int,
     "rest_api.auth_token": (str, type(None)),
     "rest_api.request_timeout": (int, float),
+    "websocket_command_server.enabled": bool,
+    "websocket_command_server.host": str,
+    "websocket_command_server.port": int,
+    "websocket_command_server.auth_token": (str, type(None)),
+    "websocket_command_server.allowed_commands": list,
+    "websocket_command_server.path": str,
+    "websocket_command_server.max_message_bytes": int,
+    "websocket_command_server.idle_timeout": (int, float),
 }
 
 

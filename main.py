@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from api.rest import RestApiServer
+from api.websocket import WebSocketCommandServer
 from cli.dashboard import TerminalDashboard
 from config.settings import load_configuration
 from core.eventbus import EventBus
@@ -76,6 +77,7 @@ registry.register("Guardian")
 plugins = PluginManager()
 dashboard = None
 rest_api = None
+websocket_command_server = None
 
 if settings["rest_api"]["enabled"]:
     rest_api = RestApiServer(
@@ -98,6 +100,58 @@ if settings["rest_api"]["enabled"]:
         request_timeout=settings[
             "rest_api"
         ]["request_timeout"],
+    )
+
+
+def execute_websocket_command(command: str):
+    result = router.execute(command)
+
+    return {
+        "command": command,
+        "result": result,
+    }
+
+
+def websocket_status():
+    statuses = service_manager.list_statuses()
+
+    return {
+        "app_name": settings["app_name"],
+        "version": settings["version"],
+        "configuration_revision": configuration.revision,
+        "scheduler_running": scheduler.is_running,
+        "services": [
+            {
+                "name": status.name,
+                "state": status.state.value,
+                "dependencies": list(status.dependencies),
+                "last_error": status.last_error,
+            }
+            for status in statuses
+        ],
+    }
+
+
+if settings["websocket_command_server"]["enabled"]:
+    websocket_command_server = WebSocketCommandServer(
+        command_handler=execute_websocket_command,
+        status_provider=websocket_status,
+        host=settings["websocket_command_server"]["host"],
+        port=settings["websocket_command_server"]["port"],
+        auth_token=settings[
+            "websocket_command_server"
+        ]["auth_token"],
+        allowed_commands=settings[
+            "websocket_command_server"
+        ]["allowed_commands"],
+        path=settings["websocket_command_server"]["path"],
+        max_message_bytes=settings[
+            "websocket_command_server"
+        ]["max_message_bytes"],
+        idle_timeout=settings[
+            "websocket_command_server"
+        ]["idle_timeout"],
+        event_bus=event_bus,
     )
 
 
@@ -156,6 +210,15 @@ if rest_api is not None:
         health=rest_api.is_running,
     )
 
+if websocket_command_server is not None:
+    service_manager.register(
+        "websocket_command_server",
+        websocket_command_server.start,
+        stop=websocket_command_server.stop,
+        dependencies=("runtime", "router", "scheduler"),
+        health=websocket_command_server.is_running,
+    )
+
 scheduler.schedule_once(
     "ghostfire.scheduler.bootstrap",
     0,
@@ -175,6 +238,14 @@ if rest_api is not None:
     print(f"REST API online: {rest_api.base_url}")
 else:
     print("REST API disabled")
+
+if websocket_command_server is not None:
+    print(
+        "WebSocket command server online: "
+        f"{websocket_command_server.base_url}"
+    )
+else:
+    print("WebSocket command server disabled")
 
 logger.info(
     "ghostfire.logging.ready",
@@ -226,6 +297,11 @@ event_bus.emit(
         "rest_api": (
             "online"
             if rest_api is not None
+            else "disabled"
+        ),
+        "websocket_command_server": (
+            "online"
+            if websocket_command_server is not None
             else "disabled"
         ),
     },
