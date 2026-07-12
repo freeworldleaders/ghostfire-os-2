@@ -15,6 +15,7 @@ from agents.framework import (
     AgentState,
     AgentTask,
 )
+from agents.tools import AgentToolRegistry
 from core.eventbus import EventBus
 
 
@@ -25,11 +26,20 @@ class AgentRegistry:
         self,
         *,
         event_bus: EventBus | None = None,
+        tool_registry: AgentToolRegistry | None = None,
         history_limit: int = 100,
         memory_limit: int = 100,
     ) -> None:
         if event_bus is not None and not isinstance(event_bus, EventBus):
             raise TypeError("event_bus must be an EventBus or None")
+
+        if (
+            tool_registry is not None
+            and not isinstance(tool_registry, AgentToolRegistry)
+        ):
+            raise TypeError(
+                "tool_registry must be an AgentToolRegistry or None"
+            )
 
         if (
             isinstance(history_limit, bool)
@@ -46,6 +56,7 @@ class AgentRegistry:
             raise ValueError("memory_limit must be a positive integer")
 
         self._event_bus = event_bus
+        self._tool_registry = tool_registry
         self._history_limit = history_limit
         self._memory_limit = memory_limit
         self._lock = RLock()
@@ -59,14 +70,41 @@ class AgentRegistry:
         role: str = "general",
         capabilities: Iterable[str] = ("status",),
         handler: AgentHandler | None = None,
+        allowed_tools: Iterable[str] = (),
     ) -> Agent:
         """Register and return one agent."""
+
+        if isinstance(allowed_tools, str):
+            raise TypeError(
+                "allowed_tools must be an iterable of names"
+            )
+
+        normalized_allowed_tools = tuple(allowed_tools)
+
+        if (
+            self._tool_registry is None
+            and normalized_allowed_tools
+        ):
+            raise AgentRegistrationError(
+                "allowed_tools require a configured tool registry"
+            )
+
+        tool_client = (
+            self._tool_registry.client(
+                agent_name=name,
+                agent_role=role,
+                allowed_tools=normalized_allowed_tools,
+            )
+            if self._tool_registry is not None
+            else None
+        )
 
         agent = Agent(
             name,
             role=role,
             capabilities=capabilities,
             handler=handler,
+            tool_client=tool_client,
             event_bus=self._event_bus,
             history_limit=self._history_limit,
             memory_limit=self._memory_limit,
@@ -205,6 +243,9 @@ class AgentRegistry:
                 for item in snapshots
             ),
             "agents": snapshots,
+            "tool_registry_attached": (
+                self._tool_registry is not None
+            ),
         }
 
     def _select_agent(

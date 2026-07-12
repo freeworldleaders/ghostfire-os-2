@@ -13,6 +13,7 @@ from runtime.engine import RuntimeEngine
 from router.router import CommandRouter
 from agents.orchestrator import AgentTaskOrchestrator
 from agents.registry import AgentRegistry
+from agents.tools import AgentToolRegistry
 from plugins.manager import PluginManager
 
 event_bus = EventBus()
@@ -71,20 +72,48 @@ print("Configuration loaded")
 runtime = RuntimeEngine()
 router = CommandRouter()
 
+tool_registry = AgentToolRegistry(
+    event_bus=event_bus,
+    history_limit=settings["agent_tools"]["history_limit"],
+    allow_mutating=settings["agent_tools"]["allow_mutating"],
+)
+
 registry = AgentRegistry(
     event_bus=event_bus,
+    tool_registry=tool_registry,
     history_limit=settings["ai_agents"]["history_limit"],
     memory_limit=settings["ai_agents"]["memory_limit"],
 )
+
+tool_registry.register(
+    "ghostfire.echo",
+    lambda message: {"message": message},
+    description="Return one message without side effects.",
+    parameters={"message": str},
+    required=("message",),
+    allowed_roles=("orchestrator",),
+)
+tool_registry.register(
+    "ghostfire.agent_status",
+    lambda: registry.snapshot(),
+    description="Return the current AI agent registry snapshot.",
+    allowed_roles=("orchestrator", "safety"),
+)
+
 registry.register(
     "Commander",
     role="orchestrator",
     capabilities=("orchestrate", "command", "status"),
+    allowed_tools=(
+        "ghostfire.echo",
+        "ghostfire.agent_status",
+    ),
 )
 registry.register(
     "Guardian",
     role="safety",
     capabilities=("validate", "guard", "status"),
+    allowed_tools=("ghostfire.agent_status",),
 )
 
 orchestrator = AgentTaskOrchestrator(
@@ -143,6 +172,7 @@ def websocket_status():
         "configuration_revision": configuration.revision,
         "scheduler_running": scheduler.is_running,
         "agents": registry.snapshot(),
+        "agent_tools": tool_registry.snapshot(),
         "agent_orchestrator": orchestrator.snapshot(),
         "services": [
             {
@@ -196,10 +226,18 @@ service_manager.register(
 )
 
 service_manager.register(
+    "agent_tools",
+    tool_registry.start,
+    stop=tool_registry.stop,
+    dependencies=("runtime",),
+    health=tool_registry.health,
+)
+
+service_manager.register(
     "agents",
     registry.start_all,
     stop=registry.stop_all,
-    dependencies=("runtime",),
+    dependencies=("runtime", "agent_tools"),
     health=registry.health,
 )
 
@@ -267,6 +305,7 @@ service_manager.start_all()
 scheduler.run_pending()
 
 print("Scheduler online")
+print("Agent tool registry online")
 print("AI agent framework online")
 print("Agent task orchestrator online")
 
@@ -322,6 +361,7 @@ event_bus.emit(
             agent.name
             for agent in registry.list_agents()
         ],
+        "agent_tools": "online",
         "agent_orchestrator": "online",
         "plugins": "started",
         "scheduler": "online",

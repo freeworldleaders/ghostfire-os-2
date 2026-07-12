@@ -13,6 +13,7 @@ from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
+from agents.tools import AgentToolClient
 from core.eventbus import EventBus
 
 
@@ -128,6 +129,7 @@ class AgentContext:
     capabilities: tuple[str, ...]
     memory: Mapping[str, Any]
     task_metadata: Mapping[str, Any]
+    tools: AgentToolClient | None
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-safe execution-context representation."""
@@ -138,6 +140,11 @@ class AgentContext:
             "capabilities": list(self.capabilities),
             "memory": deepcopy(dict(self.memory)),
             "task_metadata": deepcopy(dict(self.task_metadata)),
+            "tools": (
+                self.tools.snapshot()
+                if self.tools is not None
+                else None
+            ),
         }
 
 
@@ -194,6 +201,7 @@ class Agent:
         role: str = "general",
         capabilities: Iterable[str] = ("status",),
         handler: AgentHandler | None = None,
+        tool_client: AgentToolClient | None = None,
         event_bus: EventBus | None = None,
         history_limit: int = 100,
         memory_limit: int = 100,
@@ -204,6 +212,14 @@ class Agent:
 
         if handler is not None and not callable(handler):
             raise TypeError("handler must be callable or None")
+
+        if (
+            tool_client is not None
+            and not isinstance(tool_client, AgentToolClient)
+        ):
+            raise TypeError(
+                "tool_client must be an AgentToolClient or None"
+            )
 
         if event_bus is not None and not isinstance(event_bus, EventBus):
             raise TypeError("event_bus must be an EventBus or None")
@@ -217,6 +233,7 @@ class Agent:
             field_name="memory_limit",
         )
         self._handler = handler or self._default_handler
+        self._tool_client = tool_client
         self._event_bus = event_bus
         self._lock = RLock()
         self._state = AgentState.REGISTERED
@@ -374,6 +391,7 @@ class Agent:
                 capabilities=self._capabilities,
                 memory=_freeze_mapping(self._memory),
                 task_metadata=_freeze_mapping(task.metadata),
+                tools=self._tool_client,
             )
             started_payload = {
                 "agent": self._name,
@@ -577,6 +595,11 @@ class Agent:
             "failure_count": self._failure_count,
             "history_size": len(self._history),
             "memory_size": len(self._memory),
+            "tools": (
+                self._tool_client.snapshot()
+                if self._tool_client is not None
+                else None
+            ),
             "last_error": self._last_error,
         }
 

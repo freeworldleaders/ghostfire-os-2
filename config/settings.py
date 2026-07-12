@@ -37,6 +37,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "history_limit": 100,
         "max_tasks": 1_000,
     },
+    "agent_tools": {
+        "history_limit": 100,
+        "allow_mutating": False,
+    },
     "terminal_dashboard": {
         "enabled": True,
         "color": False,
@@ -74,6 +78,8 @@ REQUIRED_SETTINGS = {
     "ai_agents.memory_limit": int,
     "agent_orchestrator.history_limit": int,
     "agent_orchestrator.max_tasks": int,
+    "agent_tools.history_limit": int,
+    "agent_tools.allow_mutating": bool,
     "terminal_dashboard.enabled": bool,
     "terminal_dashboard.color": bool,
     "terminal_dashboard.width": int,
