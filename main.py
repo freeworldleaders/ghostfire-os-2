@@ -1,11 +1,13 @@
 from config.settings import SETTINGS
 from core.eventbus import EventBus
+from core.scheduler import Scheduler
 from runtime.engine import RuntimeEngine
 from router.router import CommandRouter
 from agents.registry import AgentRegistry
 from plugins.manager import PluginManager
 
 event_bus = EventBus()
+scheduler = Scheduler(event_bus=event_bus)
 
 event_bus.emit(
     "ghostfire.boot.started",
@@ -32,6 +34,19 @@ plugins = PluginManager()
 plugins.discover()
 plugins.start()
 
+scheduler.schedule_once(
+    "ghostfire.scheduler.bootstrap",
+    0,
+    lambda: event_bus.emit(
+        "ghostfire.scheduler.ready",
+        {"status": "online"},
+        raise_exceptions=False,
+    ),
+)
+scheduler.run_pending()
+
+print("Scheduler online")
+
 event_bus.emit(
     "ghostfire.boot.completed",
     {
@@ -39,6 +54,7 @@ event_bus.emit(
         "router": "BOOT",
         "agents": ["Commander", "Guardian"],
         "plugins": "started",
+        "scheduler": "online",
     },
     raise_exceptions=False,
 )
