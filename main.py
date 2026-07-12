@@ -70,9 +70,21 @@ print("Configuration loaded")
 runtime = RuntimeEngine()
 router = CommandRouter()
 
-registry = AgentRegistry()
-registry.register("Commander")
-registry.register("Guardian")
+registry = AgentRegistry(
+    event_bus=event_bus,
+    history_limit=settings["ai_agents"]["history_limit"],
+    memory_limit=settings["ai_agents"]["memory_limit"],
+)
+registry.register(
+    "Commander",
+    role="orchestrator",
+    capabilities=("orchestrate", "command", "status"),
+)
+registry.register(
+    "Guardian",
+    role="safety",
+    capabilities=("validate", "guard", "status"),
+)
 
 plugins = PluginManager()
 dashboard = None
@@ -120,6 +132,7 @@ def websocket_status():
         "version": settings["version"],
         "configuration_revision": configuration.revision,
         "scheduler_running": scheduler.is_running,
+        "agents": registry.snapshot(),
         "services": [
             {
                 "name": status.name,
@@ -174,7 +187,9 @@ service_manager.register(
 service_manager.register(
     "agents",
     registry.start_all,
+    stop=registry.stop_all,
     dependencies=("runtime",),
+    health=registry.health,
 )
 
 service_manager.register(
@@ -233,6 +248,7 @@ service_manager.start_all()
 scheduler.run_pending()
 
 print("Scheduler online")
+print("AI agent framework online")
 
 if rest_api is not None:
     print(f"REST API online: {rest_api.base_url}")
@@ -282,7 +298,10 @@ event_bus.emit(
     {
         "runtime": "online",
         "router": "BOOT",
-        "agents": ["Commander", "Guardian"],
+        "agents": [
+            agent.name
+            for agent in registry.list_agents()
+        ],
         "plugins": "started",
         "scheduler": "online",
         "logging": "online",

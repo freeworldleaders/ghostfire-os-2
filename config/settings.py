@@ -29,6 +29,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "service_manager": {
         "scheduler_stop_timeout": 1.0,
     },
+    "ai_agents": {
+        "history_limit": 100,
+        "memory_limit": 100,
+    },
     "terminal_dashboard": {
         "enabled": True,
         "color": False,
@@ -62,6 +66,8 @@ REQUIRED_SETTINGS = {
     "logging.backup_count": int,
     "scheduler.poll_interval": (int, float),
     "service_manager.scheduler_stop_timeout": (int, float),
+    "ai_agents.history_limit": int,
+    "ai_agents.memory_limit": int,
     "terminal_dashboard.enabled": bool,
     "terminal_dashboard.color": bool,
     "terminal_dashboard.width": int,

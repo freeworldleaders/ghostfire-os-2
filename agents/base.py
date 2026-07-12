@@ -1,6 +1,27 @@
-class Agent:
-    def __init__(self, name):
-        self.name = name
+"""Compatibility exports for the GhostFire AI agent framework."""
 
-    def run(self):
-        print(f"{self.name} online")
+from agents.framework import (
+    Agent,
+    AgentCapabilityError,
+    AgentContext,
+    AgentExecutionError,
+    AgentFrameworkError,
+    AgentRegistrationError,
+    AgentResult,
+    AgentState,
+    AgentStateError,
+    AgentTask,
+)
+
+__all__ = [
+    "Agent",
+    "AgentCapabilityError",
+    "AgentContext",
+    "AgentExecutionError",
+    "AgentFrameworkError",
+    "AgentRegistrationError",
+    "AgentResult",
+    "AgentState",
+    "AgentStateError",
+    "AgentTask",
+]
