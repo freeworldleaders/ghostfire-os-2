@@ -6,7 +6,9 @@ import socket
 import struct
 import time
 import unittest
+from unittest import mock
 
+import api.websocket as websocket_module
 from api.websocket import (
     WebSocketCommandServer,
     WebSocketSecurityError,
@@ -268,6 +270,78 @@ class WebSocketCommandServerTests(unittest.TestCase):
         self.assertTrue(server.is_running())
         self.assertTrue(server.stop())
         self.assertFalse(server.stop())
+        self.assertFalse(server.is_running())
+
+    def test_start_retries_transient_windows_bind_error(
+        self,
+    ) -> None:
+        server = self.make_server()
+        original_server_class = (
+            websocket_module._ThreadingWebSocketServer
+        )
+        attempts: list[int] = []
+
+        def build_server(*args, **kwargs):
+            attempts.append(len(attempts) + 1)
+
+            if len(attempts) == 1:
+                error = OSError(
+                    "simulated Windows socket buffer exhaustion"
+                )
+                error.winerror = 10055
+                raise error
+
+            return original_server_class(*args, **kwargs)
+
+        with (
+            mock.patch.object(
+                websocket_module,
+                "_ThreadingWebSocketServer",
+                side_effect=build_server,
+            ),
+            mock.patch.object(
+                websocket_module.gc,
+                "collect",
+            ) as collect,
+            mock.patch.object(
+                websocket_module.time,
+                "sleep",
+            ) as sleep,
+        ):
+            self.assertTrue(server.start())
+
+        self.assertEqual(attempts, [1, 2])
+        collect.assert_called_once_with()
+        sleep.assert_called_once_with(0.05)
+        self.assertTrue(server.is_running())
+
+    def test_start_reraises_non_transient_bind_error(
+        self,
+    ) -> None:
+        server = self.make_server()
+        error = OSError("simulated access denial")
+        error.winerror = 10013
+
+        with (
+            mock.patch.object(
+                websocket_module,
+                "_ThreadingWebSocketServer",
+                side_effect=error,
+            ),
+            mock.patch.object(
+                websocket_module.gc,
+                "collect",
+            ) as collect,
+            mock.patch.object(
+                websocket_module.time,
+                "sleep",
+            ) as sleep,
+        ):
+            with self.assertRaises(OSError):
+                server.start()
+
+        collect.assert_not_called()
+        sleep.assert_not_called()
         self.assertFalse(server.is_running())
 
     def test_successful_handshake_returns_switching_protocols(

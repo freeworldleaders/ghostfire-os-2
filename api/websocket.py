@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import base64
+import gc
 import hashlib
 import hmac
 import json
 import secrets
 import socket
+import time
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from ipaddress import ip_address
@@ -27,6 +29,9 @@ from core.eventbus import EventBus
 CommandHandler = Callable[[str], Any]
 StatusProvider = Callable[[], Mapping[str, Any]]
 _WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+_TRANSIENT_WINDOWS_SOCKET_ERRORS = frozenset({10048, 10055})
+_WINDOWS_SOCKET_BIND_ATTEMPTS = 6
+_WINDOWS_SOCKET_BIND_BASE_DELAY = 0.05
 
 
 class WebSocketCommandError(RuntimeError):
@@ -230,10 +235,45 @@ class WebSocketCommandServer:
                 return False
 
             handler_class = self._make_handler()
-            server = _ThreadingWebSocketServer(
-                (self._host, self._configured_port),
-                handler_class,
-            )
+            server = None
+            bind_retry_count = 0
+
+            for attempt in range(_WINDOWS_SOCKET_BIND_ATTEMPTS):
+                try:
+                    server = _ThreadingWebSocketServer(
+                        (self._host, self._configured_port),
+                        handler_class,
+                    )
+                    break
+                except OSError as exc:
+                    error_code = getattr(exc, "winerror", None)
+
+                    if error_code is None:
+                        error_code = getattr(exc, "errno", None)
+
+                    final_attempt = (
+                        attempt + 1
+                        == _WINDOWS_SOCKET_BIND_ATTEMPTS
+                    )
+
+                    if (
+                        error_code
+                        not in _TRANSIENT_WINDOWS_SOCKET_ERRORS
+                        or final_attempt
+                    ):
+                        raise
+
+                    bind_retry_count += 1
+                    gc.collect()
+                    time.sleep(
+                        _WINDOWS_SOCKET_BIND_BASE_DELAY
+                        * (2 ** attempt)
+                    )
+
+            if server is None:
+                raise WebSocketCommandError(
+                    "WebSocket bind retry loop exhausted"
+                )
 
             thread = Thread(
                 target=server.serve_forever,
@@ -246,6 +286,17 @@ class WebSocketCommandServer:
             self._thread = thread
             thread.start()
 
+        if bind_retry_count:
+            self._publish(
+                "ghostfire.websocket.bind.recovered",
+                {
+                    "host": self._host,
+                    "configured_port": self._configured_port,
+                    "bound_port": self.bound_port,
+                    "retry_count": bind_retry_count,
+                },
+            )
+
         self._publish(
             "ghostfire.websocket.started",
             {
@@ -254,6 +305,7 @@ class WebSocketCommandServer:
                 "path": self._path,
                 "authenticated": self._auth_token is not None,
                 "allowed_commands": list(self._allowed_commands),
+                "bind_retry_count": bind_retry_count,
             },
         )
 
