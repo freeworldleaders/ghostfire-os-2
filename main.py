@@ -12,6 +12,11 @@ from core.service_manager import ServiceManager
 from runtime.engine import RuntimeEngine
 from router.router import CommandRouter
 from agents.orchestrator import AgentTaskOrchestrator
+from agents.policy import (
+    AgentExecutionPolicy,
+    PolicyAction,
+    PolicyEffect,
+)
 from agents.registry import AgentRegistry
 from agents.tools import AgentToolRegistry
 from plugins.manager import PluginManager
@@ -72,8 +77,50 @@ print("Configuration loaded")
 runtime = RuntimeEngine()
 router = CommandRouter()
 
+execution_policy = AgentExecutionPolicy(
+    event_bus=event_bus,
+    history_limit=settings[
+        "agent_execution_policy"
+    ]["history_limit"],
+    default_effect=settings[
+        "agent_execution_policy"
+    ]["default_effect"],
+)
+
+execution_policy.register_rule(
+    "allow-agent-role-tasks",
+    PolicyEffect.ALLOW,
+    actions=(PolicyAction.AGENT_TASK,),
+    roles=("orchestrator", "safety"),
+    resources=("*",),
+    modes=("execute",),
+    priority=100,
+    reason="registered Kingdom agent roles may execute tasks",
+)
+execution_policy.register_rule(
+    "require-owner-approval-for-mutations",
+    PolicyEffect.REQUIRE_APPROVAL,
+    actions=(PolicyAction.TOOL_INVOCATION,),
+    roles=("orchestrator", "safety"),
+    resources=("*",),
+    modes=("mutating",),
+    priority=200,
+    reason="mutating agent tools require owner approval",
+)
+execution_policy.register_rule(
+    "allow-read-only-agent-tools",
+    PolicyEffect.ALLOW,
+    actions=(PolicyAction.TOOL_INVOCATION,),
+    roles=("orchestrator", "safety"),
+    resources=("*",),
+    modes=("read_only",),
+    priority=100,
+    reason="registered agent roles may use read-only tools",
+)
+
 tool_registry = AgentToolRegistry(
     event_bus=event_bus,
+    execution_policy=execution_policy,
     history_limit=settings["agent_tools"]["history_limit"],
     allow_mutating=settings["agent_tools"]["allow_mutating"],
 )
@@ -81,6 +128,7 @@ tool_registry = AgentToolRegistry(
 registry = AgentRegistry(
     event_bus=event_bus,
     tool_registry=tool_registry,
+    execution_policy=execution_policy,
     history_limit=settings["ai_agents"]["history_limit"],
     memory_limit=settings["ai_agents"]["memory_limit"],
 )
@@ -173,6 +221,7 @@ def websocket_status():
         "scheduler_running": scheduler.is_running,
         "agents": registry.snapshot(),
         "agent_tools": tool_registry.snapshot(),
+        "agent_execution_policy": execution_policy.snapshot(),
         "agent_orchestrator": orchestrator.snapshot(),
         "services": [
             {
@@ -226,10 +275,18 @@ service_manager.register(
 )
 
 service_manager.register(
+    "execution_policy",
+    execution_policy.start,
+    stop=execution_policy.stop,
+    dependencies=("runtime",),
+    health=execution_policy.health,
+)
+
+service_manager.register(
     "agent_tools",
     tool_registry.start,
     stop=tool_registry.stop,
-    dependencies=("runtime",),
+    dependencies=("runtime", "execution_policy"),
     health=tool_registry.health,
 )
 
@@ -305,6 +362,7 @@ service_manager.start_all()
 scheduler.run_pending()
 
 print("Scheduler online")
+print("Agent execution policy online")
 print("Agent tool registry online")
 print("AI agent framework online")
 print("Agent task orchestrator online")
@@ -362,6 +420,7 @@ event_bus.emit(
             for agent in registry.list_agents()
         ],
         "agent_tools": "online",
+        "agent_execution_policy": "online",
         "agent_orchestrator": "online",
         "plugins": "started",
         "scheduler": "online",

@@ -41,6 +41,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "history_limit": 100,
         "allow_mutating": False,
     },
+    "agent_execution_policy": {
+        "history_limit": 100,
+        "default_effect": "deny",
+    },
     "terminal_dashboard": {
         "enabled": True,
         "color": False,
@@ -80,6 +84,8 @@ REQUIRED_SETTINGS = {
     "agent_orchestrator.max_tasks": int,
     "agent_tools.history_limit": int,
     "agent_tools.allow_mutating": bool,
+    "agent_execution_policy.history_limit": int,
+    "agent_execution_policy.default_effect": str,
     "terminal_dashboard.enabled": bool,
     "terminal_dashboard.color": bool,
     "terminal_dashboard.width": int,

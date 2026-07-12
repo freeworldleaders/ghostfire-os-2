@@ -14,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from agents.framework import AgentFrameworkError, AgentResult
+from agents.policy import ExecutionPolicyError
 from agents.registry import AgentRegistry
 from core.eventbus import EventBus
 
@@ -797,7 +798,7 @@ class AgentTaskOrchestrator:
                         "orchestration_attempt": attempt,
                     },
                 )
-            except AgentFrameworkError as exc:
+            except (AgentFrameworkError, ExecutionPolicyError) as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
 
                 if attempt < task.max_attempts:

@@ -13,6 +13,7 @@ from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
+from agents.policy import AgentExecutionPolicy, PolicyAction
 from core.eventbus import EventBus
 
 
@@ -299,11 +300,24 @@ class AgentToolRegistry:
         self,
         *,
         event_bus: EventBus | None = None,
+        execution_policy: AgentExecutionPolicy | None = None,
         history_limit: int = 100,
         allow_mutating: bool = False,
     ) -> None:
         if event_bus is not None and not isinstance(event_bus, EventBus):
             raise TypeError("event_bus must be an EventBus or None")
+
+        if (
+            execution_policy is not None
+            and not isinstance(
+                execution_policy,
+                AgentExecutionPolicy,
+            )
+        ):
+            raise TypeError(
+                "execution_policy must be an "
+                "AgentExecutionPolicy or None"
+            )
 
         if (
             isinstance(history_limit, bool)
@@ -316,6 +330,7 @@ class AgentToolRegistry:
             raise TypeError("allow_mutating must be a boolean")
 
         self._event_bus = event_bus
+        self._execution_policy = execution_policy
         self._history_limit = history_limit
         self._allow_mutating = allow_mutating
         self._lock = RLock()
@@ -580,6 +595,20 @@ class AgentToolRegistry:
                     record.definition,
                     argument_values,
                 )
+
+                if self._execution_policy is not None:
+                    self._execution_policy.authorize(
+                        action=PolicyAction.TOOL_INVOCATION,
+                        agent_name=normalized_agent,
+                        agent_role=normalized_role,
+                        resource=record.definition.name,
+                        mode=record.definition.mode.value,
+                        attributes={
+                            "argument_names": tuple(
+                                sorted(validated_arguments)
+                            ),
+                        },
+                    )
             except (
                 ToolAuthorizationError,
                 ToolValidationError,
@@ -781,6 +810,9 @@ class AgentToolRegistry:
             return {
                 **self._status_payload_locked(),
                 "allow_mutating": self._allow_mutating,
+                "execution_policy_attached": (
+                    self._execution_policy is not None
+                ),
                 "tools": [
                     {
                         **record.definition.as_dict(),

@@ -15,6 +15,7 @@ from agents.framework import (
     AgentState,
     AgentTask,
 )
+from agents.policy import AgentExecutionPolicy, PolicyAction
 from agents.tools import AgentToolRegistry
 from core.eventbus import EventBus
 
@@ -27,6 +28,7 @@ class AgentRegistry:
         *,
         event_bus: EventBus | None = None,
         tool_registry: AgentToolRegistry | None = None,
+        execution_policy: AgentExecutionPolicy | None = None,
         history_limit: int = 100,
         memory_limit: int = 100,
     ) -> None:
@@ -39,6 +41,18 @@ class AgentRegistry:
         ):
             raise TypeError(
                 "tool_registry must be an AgentToolRegistry or None"
+            )
+
+        if (
+            execution_policy is not None
+            and not isinstance(
+                execution_policy,
+                AgentExecutionPolicy,
+            )
+        ):
+            raise TypeError(
+                "execution_policy must be an "
+                "AgentExecutionPolicy or None"
             )
 
         if (
@@ -57,6 +71,7 @@ class AgentRegistry:
 
         self._event_bus = event_bus
         self._tool_registry = tool_registry
+        self._execution_policy = execution_policy
         self._history_limit = history_limit
         self._memory_limit = memory_limit
         self._lock = RLock()
@@ -216,6 +231,19 @@ class AgentRegistry:
             preferred_agent=preferred_agent,
         )
 
+        if self._execution_policy is not None:
+            self._execution_policy.authorize(
+                action=PolicyAction.AGENT_TASK,
+                agent_name=agent.name,
+                agent_role=agent.role,
+                resource=task.capability,
+                mode="execute",
+                attributes={
+                    "payload_keys": tuple(sorted(task.payload)),
+                    "metadata_keys": tuple(sorted(task.metadata)),
+                },
+            )
+
         self._publish(
             "ghostfire.agent.task.routed",
             {
@@ -245,6 +273,9 @@ class AgentRegistry:
             "agents": snapshots,
             "tool_registry_attached": (
                 self._tool_registry is not None
+            ),
+            "execution_policy_attached": (
+                self._execution_policy is not None
             ),
         }
 
