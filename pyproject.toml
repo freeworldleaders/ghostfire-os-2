@@ -1,0 +1,10 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostfire-os"
+version = "0.1.0"
+
+[tool.setuptools]
+packages = ["agents","api","cli","config","core","kernel","tests"]

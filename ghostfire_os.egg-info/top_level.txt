@@ -1,0 +1,7 @@
+agents
+api
+cli
+config
+core
+kernel
+tests
