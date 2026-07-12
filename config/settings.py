@@ -29,6 +29,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "service_manager": {
         "scheduler_stop_timeout": 1.0,
     },
+    "terminal_dashboard": {
+        "enabled": True,
+        "color": False,
+        "width": 88,
+        "show_health": True,
+    },
 }
 
 REQUIRED_SETTINGS = {
@@ -39,6 +45,10 @@ REQUIRED_SETTINGS = {
     "logging.backup_count": int,
     "scheduler.poll_interval": (int, float),
     "service_manager.scheduler_stop_timeout": (int, float),
+    "terminal_dashboard.enabled": bool,
+    "terminal_dashboard.color": bool,
+    "terminal_dashboard.width": int,
+    "terminal_dashboard.show_health": bool,
 }
 
 

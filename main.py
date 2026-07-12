@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from cli.dashboard import TerminalDashboard
 from config.settings import load_configuration
 from core.eventbus import EventBus
 from core.logging import GhostFireLogger
@@ -143,6 +144,30 @@ logger.info(
 print("Logging online")
 print("Service manager online")
 
+dashboard = None
+
+if settings["terminal_dashboard"]["enabled"]:
+    dashboard = TerminalDashboard(
+        app_name=settings["app_name"],
+        version=settings["version"],
+        configuration_revision=configuration.revision,
+        configuration_sources=configuration.sources,
+        service_manager=service_manager,
+        scheduler=scheduler,
+        log_path=logger.log_path,
+        event_bus=event_bus,
+        width=settings["terminal_dashboard"]["width"],
+        color=settings["terminal_dashboard"]["color"],
+    )
+    dashboard.display(
+        check_health=settings[
+            "terminal_dashboard"
+        ]["show_health"],
+    )
+    print("Terminal dashboard online")
+else:
+    print("Terminal dashboard disabled")
+
 event_bus.emit(
     "ghostfire.boot.completed",
     {
@@ -155,6 +180,11 @@ event_bus.emit(
         "service_manager": "online",
         "configuration": "loaded",
         "configuration_revision": configuration.revision,
+        "terminal_dashboard": (
+            "online"
+            if dashboard is not None
+            else "disabled"
+        ),
     },
     raise_exceptions=False,
 )
