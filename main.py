@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from api.rest import RestApiServer
 from cli.dashboard import TerminalDashboard
 from config.settings import load_configuration
 from core.eventbus import EventBus
@@ -73,6 +74,31 @@ registry.register("Commander")
 registry.register("Guardian")
 
 plugins = PluginManager()
+dashboard = None
+rest_api = None
+
+if settings["rest_api"]["enabled"]:
+    rest_api = RestApiServer(
+        app_name=settings["app_name"],
+        version=settings["version"],
+        configuration_revision=configuration.revision,
+        configuration_sources=configuration.sources,
+        configuration=configuration.redacted(),
+        service_manager=service_manager,
+        scheduler=scheduler,
+        host=settings["rest_api"]["host"],
+        port=settings["rest_api"]["port"],
+        auth_token=settings["rest_api"]["auth_token"],
+        dashboard_provider=lambda: (
+            dashboard.as_dict()
+            if dashboard is not None
+            else None
+        ),
+        event_bus=event_bus,
+        request_timeout=settings[
+            "rest_api"
+        ]["request_timeout"],
+    )
 
 
 def start_plugins() -> None:
@@ -121,6 +147,15 @@ service_manager.register(
     health=lambda: scheduler.is_running,
 )
 
+if rest_api is not None:
+    service_manager.register(
+        "rest_api",
+        rest_api.start,
+        stop=rest_api.stop,
+        dependencies=("runtime", "scheduler"),
+        health=rest_api.is_running,
+    )
+
 scheduler.schedule_once(
     "ghostfire.scheduler.bootstrap",
     0,
@@ -136,6 +171,11 @@ scheduler.run_pending()
 
 print("Scheduler online")
 
+if rest_api is not None:
+    print(f"REST API online: {rest_api.base_url}")
+else:
+    print("REST API disabled")
+
 logger.info(
     "ghostfire.logging.ready",
     log_path=str(logger.log_path),
@@ -143,8 +183,6 @@ logger.info(
 
 print("Logging online")
 print("Service manager online")
-
-dashboard = None
 
 if settings["terminal_dashboard"]["enabled"]:
     dashboard = TerminalDashboard(
@@ -183,6 +221,11 @@ event_bus.emit(
         "terminal_dashboard": (
             "online"
             if dashboard is not None
+            else "disabled"
+        ),
+        "rest_api": (
+            "online"
+            if rest_api is not None
             else "disabled"
         ),
     },

@@ -35,6 +35,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "width": 88,
         "show_health": True,
     },
+    "rest_api": {
+        "enabled": True,
+        "host": "127.0.0.1",
+        "port": 8102,
+        "auth_token": None,
+        "request_timeout": 2.0,
+    },
 }
 
 REQUIRED_SETTINGS = {
@@ -49,6 +56,11 @@ REQUIRED_SETTINGS = {
     "terminal_dashboard.color": bool,
     "terminal_dashboard.width": int,
     "terminal_dashboard.show_health": bool,
+    "rest_api.enabled": bool,
+    "rest_api.host": str,
+    "rest_api.port": int,
+    "rest_api.auth_token": (str, type(None)),
+    "rest_api.request_timeout": (int, float),
 }
 
 
