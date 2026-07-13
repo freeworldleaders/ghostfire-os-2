@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, TextIO
 
+from agents.approval_operator_ledger import (
+    OwnerOperationLedgerQueryClient,
+    OwnerOperationLedgerQueryError,
+)
 from agents.approval_owner import AgentApprovalOwnerWorkflow
 
 
@@ -81,6 +85,7 @@ class AgentApprovalOperatorConsole:
         decision_mode: bool = False,
         width: int = 100,
         history_limit: int = 50,
+        ledger_client: OwnerOperationLedgerQueryClient | None = None,
     ) -> None:
         if not isinstance(
             workflow,
@@ -118,7 +123,20 @@ class AgentApprovalOperatorConsole:
                 "history_limit must be a positive integer"
             )
 
+        if (
+            ledger_client is not None
+            and not isinstance(
+                ledger_client,
+                OwnerOperationLedgerQueryClient,
+            )
+        ):
+            raise TypeError(
+                "ledger_client must be an "
+                "OwnerOperationLedgerQueryClient"
+            )
+
         self._workflow = workflow
+        self._ledger_client = ledger_client
         self._input = input_stream
         self._output = output_stream
         self._decision_mode = decision_mode
@@ -216,6 +234,7 @@ class AgentApprovalOperatorConsole:
             },
             "runtime": deepcopy(status_response),
             "workflow": workflow_snapshot,
+            "owner_operation_ledger": self._ledger_snapshot(),
             "secret_exposed": False,
             "action_executed": False,
         }
@@ -402,6 +421,14 @@ class AgentApprovalOperatorConsole:
                 f"MODE: {mode} | FILTER: {self._list_status.upper()}"
             ),
             self._fit(
+                "LEDGER API: "
+                + (
+                    "LOOPBACK READ-ONLY"
+                    if self._ledger_client is not None
+                    else "DISABLED"
+                )
+            ),
+            self._fit(
                 "DECISIONS RECORD APPROVAL STATE ONLY; "
                 "NO ACTION IS EXECUTED."
             ),
@@ -447,6 +474,9 @@ class AgentApprovalOperatorConsole:
                 self._fit(
                     "COMMANDS: refresh | list <status> | "
                     "select <row|id> | view"
+                ),
+                self._fit(
+                    "          ledger <health|list|latest|show|history|verify>"
                 ),
                 self._fit(
                     "          approve | deny | cancel | "
@@ -515,6 +545,10 @@ class AgentApprovalOperatorConsole:
                 self._interactive_decision(command)
                 return True
 
+            if command == "ledger":
+                self._execute_ledger_command(arguments)
+                return True
+
             if command == "history":
                 self._write_json(
                     [
@@ -534,6 +568,7 @@ class AgentApprovalOperatorConsole:
             return True
         except (
             OperatorConsoleError,
+            OwnerOperationLedgerQueryError,
             TypeError,
             ValueError,
         ) as exc:
@@ -594,6 +629,14 @@ class AgentApprovalOperatorConsole:
             history
               Show secret-free decisions from this console session.
 
+            ledger health
+            ledger list
+            ledger latest
+            ledger show <request-id>
+            ledger history
+            ledger verify
+              Query the loopback, GET-only owner-operation ledger API.
+
             quit
               Close the console without executing any action.
 
@@ -601,6 +644,89 @@ class AgentApprovalOperatorConsole:
               {SAFETY_ACKNOWLEDGEMENT}
             """
         ).strip()
+
+    def _ledger_snapshot(self) -> dict[str, Any]:
+        if self._ledger_client is None:
+            return {
+                "status": "disabled",
+                "read_only": True,
+                "loopback_only": True,
+                "action_executed": False,
+                "secret_exposed": False,
+            }
+
+        try:
+            return self._ledger_client.snapshot()
+        except OwnerOperationLedgerQueryError as exc:
+            return {
+                "status": "unavailable",
+                "message": str(exc),
+                "read_only": True,
+                "loopback_only": True,
+                "action_executed": False,
+                "secret_exposed": False,
+            }
+
+    def _execute_ledger_command(
+        self,
+        arguments: Sequence[str],
+    ) -> None:
+        if self._ledger_client is None:
+            raise OperatorConsoleError(
+                "owner-operation ledger API is not enabled"
+            )
+
+        subcommand = (
+            arguments[0].strip().lower()
+            if arguments
+            else "health"
+        )
+        extra = list(arguments[1:])
+
+        if subcommand in {"health", "status"}:
+            if extra:
+                raise OperatorConsoleError(
+                    "usage: ledger health"
+                )
+            payload = self._ledger_client.health()
+        elif subcommand == "list":
+            if extra:
+                raise OperatorConsoleError(
+                    "usage: ledger list"
+                )
+            payload = self._ledger_client.list_operations()
+        elif subcommand == "latest":
+            if extra:
+                raise OperatorConsoleError(
+                    "usage: ledger latest"
+                )
+            payload = self._ledger_client.latest_operation()
+        elif subcommand == "show":
+            if len(extra) != 1:
+                raise OperatorConsoleError(
+                    "usage: ledger show <request-id>"
+                )
+            payload = self._ledger_client.get_operation(
+                extra[0]
+            )
+        elif subcommand == "history":
+            if extra:
+                raise OperatorConsoleError(
+                    "usage: ledger history"
+                )
+            payload = self._ledger_client.history()
+        elif subcommand == "verify":
+            if extra:
+                raise OperatorConsoleError(
+                    "usage: ledger verify"
+                )
+            payload = self._ledger_client.verify()
+        else:
+            raise OperatorConsoleError(
+                f"unsupported ledger command: {subcommand}"
+            )
+
+        self._write_json(payload)
 
     def _interactive_decision(self, action: str) -> None:
         if not self._decision_mode:

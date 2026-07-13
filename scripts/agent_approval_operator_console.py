@@ -10,6 +10,9 @@ from collections.abc import Sequence
 from agents.approval_operator_console import (
     AgentApprovalOperatorConsole,
 )
+from agents.approval_operator_ledger import (
+    OwnerOperationLedgerQueryClient,
+)
 from agents.approval_owner import (
     AgentApprovalOwnerWorkflow,
     ApprovalOwnerError,
@@ -50,7 +53,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout",
         type=float,
         default=3.0,
-        help="Local WebSocket request timeout in seconds.",
+        help="Local WebSocket and ledger request timeout in seconds.",
+    )
+    parser.add_argument(
+        "--ledger-api-url",
+        default="http://127.0.0.1:8791",
+        help=(
+            "Loopback owner-operation ledger query API URL. "
+            "Only exact 127.0.0.1 HTTP URLs are accepted."
+        ),
+    )
+    parser.add_argument(
+        "--no-ledger-api",
+        action="store_true",
+        help=(
+            "Disable owner-operation ledger commands for this console session."
+        ),
     )
     return parser
 
@@ -61,6 +79,7 @@ def run_with_workflow(
     *,
     input_stream=None,
     output_stream=None,
+    ledger_client: OwnerOperationLedgerQueryClient | None = None,
 ) -> int:
     """Run one console session with an existing workflow."""
 
@@ -74,12 +93,26 @@ def run_with_workflow(
         if output_stream is None
         else output_stream
     )
+    if (
+        ledger_client is None
+        and not getattr(arguments, "no_ledger_api", False)
+    ):
+        ledger_client = OwnerOperationLedgerQueryClient(
+            getattr(
+                arguments,
+                "ledger_api_url",
+                "http://127.0.0.1:8791",
+            ),
+            timeout=arguments.timeout,
+        )
+
     console = AgentApprovalOperatorConsole(
         workflow,
         input_stream=input_stream,
         output_stream=output_stream,
         decision_mode=arguments.decision_mode,
         width=arguments.width,
+        ledger_client=ledger_client,
     )
 
     if arguments.snapshot_json:
