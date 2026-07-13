@@ -15,6 +15,9 @@ from agents.approval import AgentApprovalGate
 from agents.approval_commands import (
     AgentApprovalCommandInterface,
 )
+from agents.approval_tokens import (
+    resolve_approval_owner_token,
+)
 from agents.orchestrator import AgentTaskOrchestrator
 from agents.policy import (
     AgentExecutionPolicy,
@@ -97,14 +100,24 @@ approval_gate = AgentApprovalGate(
     ]["owner_identity"],
 )
 
+approval_command_settings = settings[
+    "agent_approval_commands"
+]
+approval_owner_token = resolve_approval_owner_token(
+    inline_token=approval_command_settings[
+        "owner_token"
+    ],
+    token_file=approval_command_settings[
+        "owner_token_file"
+    ],
+    event_bus=event_bus,
+)
+approval_token_configured = approval_owner_token is not None
+
 approval_commands = AgentApprovalCommandInterface(
     approval_gate,
-    enabled=settings[
-        "agent_approval_commands"
-    ]["enabled"],
-    owner_token=settings[
-        "agent_approval_commands"
-    ]["owner_token"],
+    enabled=approval_command_settings["enabled"],
+    owner_token=approval_owner_token,
     history_limit=settings[
         "agent_approval_commands"
     ]["history_limit"],
@@ -113,6 +126,7 @@ approval_commands = AgentApprovalCommandInterface(
     ]["max_note_length"],
     event_bus=event_bus,
 )
+approval_owner_token = None
 
 execution_policy = AgentExecutionPolicy(
     event_bus=event_bus,
@@ -425,6 +439,12 @@ scheduler.run_pending()
 
 print("Scheduler online")
 print("Agent approval gate online")
+
+if approval_token_configured:
+    print("Agent approval owner token loaded")
+else:
+    print("Agent approval owner token not configured")
+
 print("Agent approval command interface online")
 print("Agent execution policy online")
 print("Agent tool registry online")
