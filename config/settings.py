@@ -45,6 +45,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "history_limit": 100,
         "default_effect": "deny",
     },
+    "agent_approval_gate": {
+        "history_limit": 100,
+        "max_pending": 100,
+        "approval_ttl_seconds": 300.0,
+        "owner_identity": "owner",
+    },
     "terminal_dashboard": {
         "enabled": True,
         "color": False,
@@ -86,6 +92,10 @@ REQUIRED_SETTINGS = {
     "agent_tools.allow_mutating": bool,
     "agent_execution_policy.history_limit": int,
     "agent_execution_policy.default_effect": str,
+    "agent_approval_gate.history_limit": int,
+    "agent_approval_gate.max_pending": int,
+    "agent_approval_gate.approval_ttl_seconds": (int, float),
+    "agent_approval_gate.owner_identity": str,
     "terminal_dashboard.enabled": bool,
     "terminal_dashboard.color": bool,
     "terminal_dashboard.width": int,

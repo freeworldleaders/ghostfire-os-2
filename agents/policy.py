@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
+from agents.approval import AgentApprovalGate, ApprovalStatus
 from core.eventbus import EventBus
 
 
@@ -64,8 +65,13 @@ class PolicyDeniedError(ExecutionPolicyError):
 class PolicyApprovalRequiredError(ExecutionPolicyError):
     """Raised when execution requires owner approval."""
 
-    def __init__(self, decision: "PolicyDecision") -> None:
+    def __init__(
+        self,
+        decision: "PolicyDecision",
+        approval: Any | None = None,
+    ) -> None:
         self.decision = decision
+        self.approval = approval
         super().__init__(
             f"owner approval required: {decision.reason}"
         )
@@ -217,6 +223,8 @@ class PolicyDecision:
     effect: PolicyEffect
     rule_name: str | None
     reason: str
+    approval_id: str | None = None
+    approved_by: str | None = None
     evaluated_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
@@ -234,6 +242,8 @@ class PolicyDecision:
             "rule_name": self.rule_name,
             "reason": self.reason,
             "allowed": self.allowed,
+            "approval_id": self.approval_id,
+            "approved_by": self.approved_by,
             "evaluated_at": self.evaluated_at.isoformat(),
         }
 
@@ -259,11 +269,20 @@ class AgentExecutionPolicy:
         self,
         *,
         event_bus: EventBus | None = None,
+        approval_gate: AgentApprovalGate | None = None,
         history_limit: int = 100,
         default_effect: PolicyEffect | str = PolicyEffect.DENY,
     ) -> None:
         if event_bus is not None and not isinstance(event_bus, EventBus):
             raise TypeError("event_bus must be an EventBus or None")
+
+        if (
+            approval_gate is not None
+            and not isinstance(approval_gate, AgentApprovalGate)
+        ):
+            raise TypeError(
+                "approval_gate must be an AgentApprovalGate or None"
+            )
 
         if (
             isinstance(history_limit, bool)
@@ -275,6 +294,7 @@ class AgentExecutionPolicy:
             )
 
         self._event_bus = event_bus
+        self._approval_gate = approval_gate
         self._history_limit = history_limit
         self._default_effect = _normalize_effect(default_effect)
         self._lock = RLock()
@@ -546,9 +566,109 @@ class AgentExecutionPolicy:
             raise PolicyDeniedError(decision)
 
         if decision.effect is PolicyEffect.REQUIRE_APPROVAL:
-            raise PolicyApprovalRequiredError(decision)
+            if self._approval_gate is None:
+                raise PolicyApprovalRequiredError(decision)
+
+            approval = self._approval_gate.authorize_or_request(
+                action=request.action.value,
+                agent_name=request.agent_name,
+                agent_role=request.agent_role,
+                resource=request.resource,
+                mode=request.mode,
+                attributes=request.attributes,
+                policy_rule=decision.rule_name,
+                policy_reason=decision.reason,
+            )
+
+            if approval.status is ApprovalStatus.DENIED:
+                denied = PolicyDecision(
+                    request=request,
+                    effect=PolicyEffect.DENY,
+                    rule_name=decision.rule_name,
+                    reason=(
+                        "owner denied approval request "
+                        f"{approval.identifier}"
+                    ),
+                    approval_id=approval.identifier,
+                    approved_by=approval.decided_by,
+                )
+                self._replace_recorded_decision(
+                    decision,
+                    denied,
+                )
+                raise PolicyDeniedError(denied)
+
+            if approval.status is ApprovalStatus.CONSUMED:
+                approved = PolicyDecision(
+                    request=request,
+                    effect=PolicyEffect.ALLOW,
+                    rule_name=decision.rule_name,
+                    reason=(
+                        "owner approval consumed for "
+                        f"{approval.identifier}"
+                    ),
+                    approval_id=approval.identifier,
+                    approved_by=approval.decided_by,
+                )
+                self._replace_recorded_decision(
+                    decision,
+                    approved,
+                )
+                return approved
+
+            raise PolicyApprovalRequiredError(
+                decision,
+                approval,
+            )
 
         return decision
+
+    def _replace_recorded_decision(
+        self,
+        original: PolicyDecision,
+        replacement: PolicyDecision,
+    ) -> None:
+        with self._lock:
+            replaced = False
+
+            for index in range(
+                len(self._history) - 1,
+                -1,
+                -1,
+            ):
+                if self._history[index] is original:
+                    self._history[index] = replacement
+                    replaced = True
+                    break
+
+            if not replaced:
+                self._history.append(replacement)
+
+            if original.effect is PolicyEffect.ALLOW:
+                self._allow_count = max(
+                    0,
+                    self._allow_count - 1,
+                )
+            elif original.effect is PolicyEffect.DENY:
+                self._deny_count = max(
+                    0,
+                    self._deny_count - 1,
+                )
+            else:
+                self._approval_count = max(
+                    0,
+                    self._approval_count - 1,
+                )
+
+            if replacement.effect is PolicyEffect.ALLOW:
+                self._allow_count += 1
+            elif replacement.effect is PolicyEffect.DENY:
+                self._deny_count += 1
+            else:
+                self._approval_count += 1
+
+            if self._last_decision is original:
+                self._last_decision = replacement
 
     def list_rules(self) -> tuple[PolicyRule, ...]:
         """Return rules in effective evaluation order."""
@@ -587,6 +707,9 @@ class AgentExecutionPolicy:
             return {
                 **self._status_payload_locked(),
                 "default_effect": self._default_effect.value,
+                "approval_gate_attached": (
+                    self._approval_gate is not None
+                ),
                 "rules": [
                     {
                         **record.rule.as_dict(),

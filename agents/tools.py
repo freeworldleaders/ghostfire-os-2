@@ -13,7 +13,11 @@ from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
-from agents.policy import AgentExecutionPolicy, PolicyAction
+from agents.policy import (
+    AgentExecutionPolicy,
+    ExecutionPolicyError,
+    PolicyAction,
+)
 from core.eventbus import EventBus
 
 
@@ -607,11 +611,13 @@ class AgentToolRegistry:
                             "argument_names": tuple(
                                 sorted(validated_arguments)
                             ),
+                            "arguments": validated_arguments,
                         },
                     )
             except (
                 ToolAuthorizationError,
                 ToolValidationError,
+                ExecutionPolicyError,
             ) as exc:
                 self._publish(
                     "ghostfire.agent_tool.invocation.denied",

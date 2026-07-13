@@ -241,6 +241,8 @@ class AgentRegistry:
                 attributes={
                     "payload_keys": tuple(sorted(task.payload)),
                     "metadata_keys": tuple(sorted(task.metadata)),
+                    "payload": task.payload,
+                    "metadata": task.metadata,
                 },
             )
 

@@ -11,6 +11,7 @@ from core.scheduler import Scheduler
 from core.service_manager import ServiceManager
 from runtime.engine import RuntimeEngine
 from router.router import CommandRouter
+from agents.approval import AgentApprovalGate
 from agents.orchestrator import AgentTaskOrchestrator
 from agents.policy import (
     AgentExecutionPolicy,
@@ -77,8 +78,25 @@ print("Configuration loaded")
 runtime = RuntimeEngine()
 router = CommandRouter()
 
+approval_gate = AgentApprovalGate(
+    event_bus=event_bus,
+    history_limit=settings[
+        "agent_approval_gate"
+    ]["history_limit"],
+    max_pending=settings[
+        "agent_approval_gate"
+    ]["max_pending"],
+    approval_ttl_seconds=settings[
+        "agent_approval_gate"
+    ]["approval_ttl_seconds"],
+    owner_identity=settings[
+        "agent_approval_gate"
+    ]["owner_identity"],
+)
+
 execution_policy = AgentExecutionPolicy(
     event_bus=event_bus,
+    approval_gate=approval_gate,
     history_limit=settings[
         "agent_execution_policy"
     ]["history_limit"],
@@ -221,6 +239,7 @@ def websocket_status():
         "scheduler_running": scheduler.is_running,
         "agents": registry.snapshot(),
         "agent_tools": tool_registry.snapshot(),
+        "agent_approval_gate": approval_gate.snapshot(),
         "agent_execution_policy": execution_policy.snapshot(),
         "agent_orchestrator": orchestrator.snapshot(),
         "services": [
@@ -275,10 +294,18 @@ service_manager.register(
 )
 
 service_manager.register(
+    "approval_gate",
+    approval_gate.start,
+    stop=approval_gate.stop,
+    dependencies=("runtime",),
+    health=approval_gate.health,
+)
+
+service_manager.register(
     "execution_policy",
     execution_policy.start,
     stop=execution_policy.stop,
-    dependencies=("runtime",),
+    dependencies=("runtime", "approval_gate"),
     health=execution_policy.health,
 )
 
@@ -362,6 +389,7 @@ service_manager.start_all()
 scheduler.run_pending()
 
 print("Scheduler online")
+print("Agent approval gate online")
 print("Agent execution policy online")
 print("Agent tool registry online")
 print("AI agent framework online")
@@ -420,6 +448,7 @@ event_bus.emit(
             for agent in registry.list_agents()
         ],
         "agent_tools": "online",
+        "agent_approval_gate": "online",
         "agent_execution_policy": "online",
         "agent_orchestrator": "online",
         "plugins": "started",
