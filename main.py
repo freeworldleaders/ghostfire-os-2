@@ -12,6 +12,9 @@ from core.service_manager import ServiceManager
 from runtime.engine import RuntimeEngine
 from router.router import CommandRouter
 from agents.approval import AgentApprovalGate
+from agents.approval_commands import (
+    AgentApprovalCommandInterface,
+)
 from agents.orchestrator import AgentTaskOrchestrator
 from agents.policy import (
     AgentExecutionPolicy,
@@ -92,6 +95,23 @@ approval_gate = AgentApprovalGate(
     owner_identity=settings[
         "agent_approval_gate"
     ]["owner_identity"],
+)
+
+approval_commands = AgentApprovalCommandInterface(
+    approval_gate,
+    enabled=settings[
+        "agent_approval_commands"
+    ]["enabled"],
+    owner_token=settings[
+        "agent_approval_commands"
+    ]["owner_token"],
+    history_limit=settings[
+        "agent_approval_commands"
+    ]["history_limit"],
+    max_note_length=settings[
+        "agent_approval_commands"
+    ]["max_note_length"],
+    event_bus=event_bus,
 )
 
 execution_policy = AgentExecutionPolicy(
@@ -240,6 +260,7 @@ def websocket_status():
         "agents": registry.snapshot(),
         "agent_tools": tool_registry.snapshot(),
         "agent_approval_gate": approval_gate.snapshot(),
+        "agent_approval_commands": approval_commands.snapshot(),
         "agent_execution_policy": execution_policy.snapshot(),
         "agent_orchestrator": orchestrator.snapshot(),
         "services": [
@@ -258,6 +279,7 @@ if settings["websocket_command_server"]["enabled"]:
     websocket_command_server = WebSocketCommandServer(
         command_handler=execute_websocket_command,
         status_provider=websocket_status,
+        approval_handler=approval_commands.handle,
         host=settings["websocket_command_server"]["host"],
         port=settings["websocket_command_server"]["port"],
         auth_token=settings[
@@ -299,6 +321,14 @@ service_manager.register(
     stop=approval_gate.stop,
     dependencies=("runtime",),
     health=approval_gate.health,
+)
+
+service_manager.register(
+    "approval_commands",
+    approval_commands.start,
+    stop=approval_commands.stop,
+    dependencies=("approval_gate",),
+    health=approval_commands.health,
 )
 
 service_manager.register(
@@ -371,7 +401,12 @@ if websocket_command_server is not None:
         "websocket_command_server",
         websocket_command_server.start,
         stop=websocket_command_server.stop,
-        dependencies=("runtime", "router", "scheduler"),
+        dependencies=(
+            "runtime",
+            "router",
+            "scheduler",
+            "approval_commands",
+        ),
         health=websocket_command_server.is_running,
     )
 
@@ -390,6 +425,7 @@ scheduler.run_pending()
 
 print("Scheduler online")
 print("Agent approval gate online")
+print("Agent approval command interface online")
 print("Agent execution policy online")
 print("Agent tool registry online")
 print("AI agent framework online")
@@ -449,6 +485,7 @@ event_bus.emit(
         ],
         "agent_tools": "online",
         "agent_approval_gate": "online",
+        "agent_approval_commands": "online",
         "agent_execution_policy": "online",
         "agent_orchestrator": "online",
         "plugins": "started",

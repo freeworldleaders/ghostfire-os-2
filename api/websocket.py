@@ -28,6 +28,10 @@ from core.eventbus import EventBus
 
 CommandHandler = Callable[[str], Any]
 StatusProvider = Callable[[], Mapping[str, Any]]
+ApprovalHandler = Callable[
+    [Mapping[str, Any]],
+    Mapping[str, Any],
+]
 _WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 _TRANSIENT_WINDOWS_SOCKET_ERRORS = frozenset({10048, 10055})
 _WINDOWS_SOCKET_BIND_ATTEMPTS = 6
@@ -70,6 +74,7 @@ class WebSocketCommandServer:
         *,
         command_handler: CommandHandler,
         status_provider: StatusProvider,
+        approval_handler: ApprovalHandler | None = None,
         host: str = "127.0.0.1",
         port: int = 8103,
         auth_token: str | None = None,
@@ -84,6 +89,14 @@ class WebSocketCommandServer:
 
         if not callable(status_provider):
             raise TypeError("status_provider must be callable")
+
+        if (
+            approval_handler is not None
+            and not callable(approval_handler)
+        ):
+            raise TypeError(
+                "approval_handler must be callable or None"
+            )
 
         self._host = self._validate_text(
             host,
@@ -158,6 +171,7 @@ class WebSocketCommandServer:
 
         self._command_handler = command_handler
         self._status_provider = status_provider
+        self._approval_handler = approval_handler
         self._configured_port = port
         self._auth_token = auth_token
         self._allowed_commands = tuple(normalized_commands)
@@ -172,6 +186,7 @@ class WebSocketCommandServer:
         self._total_connections = 0
         self._message_count = 0
         self._command_count = 0
+        self._approval_command_count = 0
 
     @property
     def bound_port(self) -> int:
@@ -216,6 +231,13 @@ class WebSocketCommandServer:
 
         with self._lock:
             return self._command_count
+
+    @property
+    def approval_command_count(self) -> int:
+        """Return successful owner approval commands."""
+
+        with self._lock:
+            return self._approval_command_count
 
     def is_running(self) -> bool:
         """Return whether the listener worker is active."""
@@ -713,12 +735,124 @@ class WebSocketCommandServer:
             )
             return
 
+        if message_type == "approval":
+            if self._approval_handler is None:
+                self._send_error(
+                    writer,
+                    request_id=request_id,
+                    code="approval_unavailable",
+                    message=(
+                        "approval command interface is unavailable"
+                    ),
+                )
+                return
+
+            action = message.get("action")
+            safe_action = (
+                action
+                if isinstance(action, str)
+                else "unknown"
+            )
+
+            self._publish(
+                "ghostfire.websocket.approval.received",
+                {
+                    "connection_id": connection_id,
+                    "request_id": request_id,
+                    "action": safe_action,
+                },
+            )
+
+            try:
+                response = deepcopy(
+                    dict(self._approval_handler(message))
+                )
+            except Exception as exc:
+                self._publish(
+                    "ghostfire.websocket.approval.failed",
+                    {
+                        "connection_id": connection_id,
+                        "request_id": request_id,
+                        "action": safe_action,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                self._send_error(
+                    writer,
+                    request_id=request_id,
+                    code="approval_failed",
+                    message="approval command failed",
+                )
+                return
+
+            if response.get("status") != "ok":
+                code = response.get("code")
+                public_message = response.get("message")
+
+                if not isinstance(code, str) or not code:
+                    code = "approval_failed"
+
+                if (
+                    not isinstance(public_message, str)
+                    or not public_message
+                ):
+                    public_message = "approval command failed"
+
+                self._publish(
+                    "ghostfire.websocket.approval.denied",
+                    {
+                        "connection_id": connection_id,
+                        "request_id": request_id,
+                        "action": safe_action,
+                        "error_code": code,
+                    },
+                )
+                self._send_error(
+                    writer,
+                    request_id=request_id,
+                    code=code,
+                    message=public_message,
+                )
+                return
+
+            with self._lock:
+                self._approval_command_count += 1
+
+            self._publish(
+                "ghostfire.websocket.approval.completed",
+                {
+                    "connection_id": connection_id,
+                    "request_id": request_id,
+                    "action": response.get(
+                        "action",
+                        safe_action,
+                    ),
+                },
+            )
+            self._send_json(
+                writer,
+                {
+                    "id": request_id,
+                    "type": "approval_result",
+                    "status": "ok",
+                    "action": response.get(
+                        "action",
+                        safe_action,
+                    ),
+                    "data": response.get("data"),
+                },
+            )
+            return
+
         if message_type != "command":
             self._send_error(
                 writer,
                 request_id=request_id,
                 code="unsupported_type",
-                message="type must be ping, status, or command",
+                message=(
+                    "type must be ping, status, approval, "
+                    "or command"
+                ),
             )
             return
 

@@ -51,6 +51,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "approval_ttl_seconds": 300.0,
         "owner_identity": "owner",
     },
+    "agent_approval_commands": {
+        "enabled": False,
+        "owner_token": None,
+        "history_limit": 100,
+        "max_note_length": 500,
+    },
     "terminal_dashboard": {
         "enabled": True,
         "color": False,
@@ -96,6 +102,10 @@ REQUIRED_SETTINGS = {
     "agent_approval_gate.max_pending": int,
     "agent_approval_gate.approval_ttl_seconds": (int, float),
     "agent_approval_gate.owner_identity": str,
+    "agent_approval_commands.enabled": bool,
+    "agent_approval_commands.owner_token": (str, type(None)),
+    "agent_approval_commands.history_limit": int,
+    "agent_approval_commands.max_note_length": int,
     "terminal_dashboard.enabled": bool,
     "terminal_dashboard.color": bool,
     "terminal_dashboard.width": int,
